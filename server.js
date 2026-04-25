@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
 
 const app = express();
 app.use(cors());
@@ -9,54 +8,50 @@ app.use(express.static('public'));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const AFFILIATE_URL = process.env.AFFILIATE_URL || 'https://aviasales.tpk.lv/09JBVSD2';
-const TP_TOKEN = process.env.TP_TOKEN; // TravelPayouts API token
+const TP_TOKEN = process.env.TP_TOKEN;
 
-const SYSTEM_PROMPT = `Je Viktoria, asistente miqësore dhe eksperte e agjencisë "Viktoria Travel" në Shqipëri.
+const SYSTEM_PROMPT = `Je Viktoria, asistente miqesore e agjencise "Viktoria Travel" ne Shqiperi.
 
-RREGULLI MË I RËNDËSISHËM: Kur dikush thotë një destinacion, MOS jep këshilla menjëherë.
-Fillimisht mbledh këto të dhëna me një mesazh bisedor dhe njerëzor (jo si formular):
-- Sa persona udhëtojnë? (dhe a ka fëmijë?)
-- Sa netë qëndrim?
-- Nga cili qytet niset udhëtimi? (zakonisht Tirana)
-- Çfarë aktivitetesh preferojnë? (natyrë, histori, plazh, jetë nate, shopping, ushqim lokal, etj.)
+RREGULLI ME I RENDESISHEM: Kur dikush thote nje destinacion, MOS jep keshilla menjehere. Fillimisht mbledh keto te dhena me nje mesazh bisedor:
+- Sa persona udhetojne? (dhe a ka femije?)
+- Sa nete qendrim?
+- Nga cili qytet niset udhetimi? (zakonisht Tirana)
+- Cfare aktivitetesh preferojne? (natyre, histori, plazh, jete nate, shopping, ushqim lokal, etj.)
 
-VETËM pasi ke të gjitha këto, jep këshilla konkrete dhe personale.
+VETEM pasi ke te gjitha keto, jep keshilla konkrete dhe personale.
 
-TONI: Si mik i ngrohtë që ka udhëtuar shumë — jo si broshurë turistike. Paragrafë të shkurtra, pa lista të gjata me bullet points.
+TONI: Si mik i ngrohe qe ka udhetuar shume. Paragrage te shkurtra, pa lista te gjata.
 
-FLUTURIMET: Kur je gati të rekomandosh, në fund të mesazhit shto gjithmonë seksionin e fluturimeve me tagun special:
-[SHOW_FLIGHTS:destinacion_anglisht]
+FLUTURIMET: Kur je gati te rekomandosh destinacionin, ne fund shto: [SHOW_FLIGHTS:IATA_CODE]
+Shembull: per Malte shto [SHOW_FLIGHTS:MLA], per Berlin [SHOW_FLIGHTS:BER], per Greqi [SHOW_FLIGHTS:ATH]
 
-Shembull: nëse klienti shkon në Maltë, shto [SHOW_FLIGHTS:Malta]
-Nëse shkon në Berlin, shto [SHOW_FLIGHTS:Berlin]
+NJOHURI LOKALE:
+- WizzAir dhe Ryanair kane fluturime DIREKTE nga Tirana per shume destinacione europiane
+- Malte: direkt nga Tirana me WizzAir/Ryanair
+- Greqi: shume direkte
+- Itali: direkte per Milano, Rome, Bari
+- Gjermani: direkte per Berlin, Mynih
 
-NJOHURI LOKALE TË RËNDËSISHME:
-- Nga Tirana, WizzAir dhe Ryanair kanë fluturime DIREKTE për shumë destinacione europiane
-- Air Albania fluturon gjithashtu për disa destinacione
-- Gjithmonë kontrollo nëse ka direkt para se të thuash "me ndalesë"
-- Malta: WizzAir dhe Ryanair kanë direkt nga Tirana
-- Greqi (Athinë, Korfuz, Selanik): fluturime të shumta direkte
-- Itali (Milano, Romë, Bari, Bergamo): direkte
-- Gjermani (Berlin, Mynih): direkte me WizzAir
-- Mbaj mend: klienti është nga Shqipëria, jo nga vendet e tjera
+Fol gjithmone shqip.`;
 
-Fol gjithmonë shqip.`;
+app.get('/test', (req, res) => {
+  res.json({ status: 'ok', gemini_key: GEMINI_API_KEY ? 'set' : 'missing' });
+});
 
-// Chat endpoint
 app.post('/api/chat', async (req, res) => {
-  const { messages } = req.body;
-  if (!messages || !GEMINI_API_KEY) {
-    return res.status(400).json({ error: 'Missing messages or API key' });
-  }
-
   try {
-    // Convert to Gemini format
+    const { messages } = req.body;
+
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
+    }
+
     const geminiMessages = messages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
     }));
 
-    const response = await fetch(
+    const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
@@ -64,16 +59,15 @@ app.post('/api/chat', async (req, res) => {
         body: JSON.stringify({
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: geminiMessages,
-          generationConfig: { maxOutputTokens: 1000, temperature: 0.8 }
+          generationConfig: { maxOutputTokens: 800, temperature: 0.8 }
         })
       }
     );
 
-    const data = await response.json();
-    console.log('Gemini response:', JSON.stringify(data));
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Ndodhi një gabim.';
+    const data = await geminiRes.json();
+    console.log('Gemini:', JSON.stringify(data).substring(0, 300));
 
-    // Check if we need to show flights
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Ndodhi nje gabim.';
     const flightMatch = text.match(/\[SHOW_FLIGHTS:([^\]]+)\]/);
     const cleanText = text.replace(/\[SHOW_FLIGHTS:[^\]]+\]/g, '').trim();
 
@@ -85,30 +79,18 @@ app.post('/api/chat', async (req, res) => {
     res.json({ text: cleanText, flights, affiliateUrl: AFFILIATE_URL });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// TravelPayouts flight prices
-async function getFlights(destination) {
+async function getFlights(iata) {
   try {
-    const destCodes = {
-      'Malta': 'MLA', 'Berlin': 'BER', 'Rome': 'FCO', 'Milano': 'MXP',
-      'Paris': 'CDG', 'London': 'LHR', 'Barcelona': 'BCN', 'Amsterdam': 'AMS',
-      'Athens': 'ATH', 'Athinë': 'ATH', 'Dubai': 'DXB', 'Istanbul': 'IST',
-      'Vienna': 'VIE', 'Prague': 'PRG', 'Budapest': 'BUD', 'Munich': 'MUC',
-      'Mynih': 'MUC', 'Greqi': 'ATH', 'Itali': 'FCO', 'Gjermani': 'BER'
-    };
-
-    const iata = destCodes[destination] || destination;
     const url = `https://api.travelpayouts.com/v1/prices/cheap?origin=TIA&destination=${iata}&currency=EUR&token=${TP_TOKEN}`;
     const r = await fetch(url);
     const d = await r.json();
-
     if (d.data && d.data[iata]) {
-      const prices = Object.values(d.data[iata]).slice(0, 3);
-      return prices.map(p => ({
+      return Object.values(d.data[iata]).slice(0, 3).map(p => ({
         price: p.price,
         airline: p.airline,
         departure: p.departure_at,
@@ -121,6 +103,5 @@ async function getFlights(destination) {
   }
 }
 
-Commit
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Viktoria AI running on port ${PORT}`));
