@@ -70,6 +70,7 @@ app.post('/api/chat', async (req, res) => {
     );
 
     const data = await response.json();
+    console.log('Gemini response:', JSON.stringify(data));
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Ndodhi një gabim.';
 
     // Check if we need to show flights
